@@ -57,15 +57,149 @@ function getSecid(code,market){
 }
 
 // ========== 东方财富API（单股详情、指数、搜索仍可用） ==========
+// 腾讯API获取单股详情（替代东方财富stock/get）
+async function fetchQuoteQQ(secid){
+  const parts=secid.split('.');
+  let symbol='';
+  if(parts[0]==='1') symbol='sh'+parts[1];
+  else if(parts[0]==='0') symbol='sz'+parts[1];
+  else if(parts[0]==='116'||parts[0]==='128'||parts[0]==='100') symbol='hk'+parts[1];
+  else symbol='sh'+parts[1];
+  try{
+    const r=await fetch('https://web.sqt.gtimg.cn/q='+symbol);
+    const buf=await r.arrayBuffer();
+    const text=new TextDecoder('gbk').decode(buf);
+    const m=text.match(/v_[^=]+="([^"]*)"/);
+    if(!m)return null;
+    const f=m[1].split('~');
+    if(f.length<50||!f[1])return null;
+    // 映射为东方财富fetchQuote的字段格式，保持detail.js和ui.js兼容
+    return {
+      f43: parseFloat(f[3])||0,    // 最新价
+      f44: parseFloat(f[33])||0,   // 最高
+      f45: parseFloat(f[34])||0,   // 最低
+      f46: parseFloat(f[5])||0,    // 今开
+      f47: parseInt(f[6])||0,      // 成交量(手)
+      f48: parseFloat(f[37])*10000||0, // 成交额
+      f49: 0,
+      f50: parseFloat(f[49])||0,   // 量比
+      f51: 0, f52: 0, f55: 0,
+      f57: f[2],                    // 代码
+      f58: f[1],                    // 名称
+      f60: parseFloat(f[4])||0,    // 昨收
+      f116: parseFloat(f[44])*1e8||0, // 总市值
+      f117: parseFloat(f[45])*1e8||0, // 流通市值
+      f162: parseFloat(f[39])||0,  // PE
+      f168: parseFloat(f[38])||0,  // 换手率
+      f169: parseFloat(f[31])||0,  // 涨跌额
+      f170: parseFloat(f[32])||0,  // 涨跌幅
+      f171: parseFloat(f[43])||0,  // 振幅
+      f292: 0, f13: 0
+    };
+  }catch(e){
+    console.error('腾讯单股API失败:',e);
+    return null;
+  }
+}
+
 async function fetchQuote(secid){
+  // 优先使用腾讯API
+  const qqData=await fetchQuoteQQ(secid);
+  if(qqData&&qqData.f43)return qqData;
+  // 回退东方财富
   const url=`https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f168,f169,f170,f171,f292,f13&ut=fa5fd1943c7b386f172d6893dbbd1d0c&fltt=2`;
   const d=await smartFetch(url);return d?.data||null;
 }
+
+// 腾讯分时线API（替代东方财富trends2/get）
+async function fetchMinuteQQ(secid){
+  const parts=secid.split('.');
+  let symbol='';
+  if(parts[0]==='1') symbol='sh'+parts[1];
+  else if(parts[0]==='0') symbol='sz'+parts[1];
+  else if(parts[0]==='116'||parts[0]==='128'||parts[0]==='100') symbol='hk'+parts[1];
+  else symbol='sh'+parts[1];
+  try{
+    const r=await fetch(`https://web.ifzq.gtimg.cn/appstock/app/minute/query?_var=min_data&code=${symbol}`);
+    const text=await r.text();
+    // 腾讯分时返回格式: min_data={...}
+    const jsonStr=text.replace(/^[^{]*/,'').replace(/;?\s*$/,'');
+    const d=JSON.parse(jsonStr);
+    const key=Object.keys(d.data||{})[0];
+    if(!key||!d.data[key])return null;
+    const info=d.data[key].qt||{};
+    const qtArr=info[key]||[];
+    const preClose=parseFloat(qtArr[4])||0;
+    const minuteData=d.data[key].data?.data||d.data[key].data?.today||[];
+    if(!minuteData.length)return null;
+    // 腾讯分时格式: "时间 价格 累计成交量(手) 累计成交额"
+    // 需要转换为: "时间,价格,均价,当分钟成交量"
+    let prevCumVol=0;
+    const trends=minuteData.map(line=>{
+      const parts2=line.split(' ');
+      const time=parts2[0];
+      const price=parseFloat(parts2[1])||0;
+      const cumVol=parseInt(parts2[2])||0;
+      const cumAmount=parseFloat(parts2[3])||0;
+      const minVol=cumVol-prevCumVol; // 当分钟成交量
+      prevCumVol=cumVol;
+      const avg=cumVol>0?(cumAmount/(cumVol*100)).toFixed(2):price.toFixed(2); // 成交额/(累计量*100)=均价
+      return `${time.substring(0,2)}:${time.substring(2,4)},${price},${avg},${minVol}`;
+    });
+    return {trends:trends, prePrice:preClose};
+  }catch(e){
+    console.error('腾讯分时API失败:',e);
+    return null;
+  }
+}
+
 async function fetchMinute(secid){
+  // 优先使用腾讯API
+  const qqData=await fetchMinuteQQ(secid);
+  if(qqData&&qqData.trends&&qqData.trends.length>0)return qqData;
+  // 回退东方财富
   const url=`https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ut=fa5fd1943c7b386f172d6893dbbd1d0c&iscr=0&ndays=1`;
   const d=await smartFetch(url);return d?.data||null;
 }
+
+// 腾讯指数行情API（替代东方财富ulist.np/get）
+async function fetchIndexDataQQ(){
+  const codes='sh000001,sz399001,sz399006,hkHSI,hkHSTECH';
+  const nameMap={'000001':'上证指数','399001':'深证成指','399006':'创业板指','HSI':'恒生指数','HSTECH':'恒生科技'};
+  try{
+    const r=await fetch('https://web.sqt.gtimg.cn/q='+codes);
+    const buf=await r.arrayBuffer();
+    const text=new TextDecoder('gbk').decode(buf);
+    const results=[];
+    const lines=text.split('\n');
+    for(const line of lines){
+      const m2=line.match(/v_([^=]+)="([^"]*)"/);
+      if(!m2)continue;
+      const f=m2[1].split('~');
+      const fields=m2[2].split('~');
+      if(fields.length<35)continue;
+      const code=fields[2]||m2[1].replace(/^(sh|sz|hk)/,'');
+      results.push({
+        f14: fields[1]||nameMap[code]||code,
+        f2: parseFloat(fields[3])||0,
+        f3: parseFloat(fields[32])||0
+      });
+    }
+    return results;
+  }catch(e){return null}
+}
+
 async function fetchIndexData(){
+  // 先尝试腾讯API
+  try{
+    const qqResults=await fetchIndexDataQQ();
+    if(qqResults&&qqResults.length>0){
+      const bar=document.getElementById('indexBar');
+      bar.innerHTML=qqResults.map(i=>{const c=i.f3>0?'up':i.f3<0?'down':'flat';return `<div class="index-item"><span class="index-name">${i.f14}</span><span class="index-val ${c}">${fmtN(i.f2)}</span><span class="index-val ${c}">${i.f3>0?'+':''}${i.f3?.toFixed(2)||'--'}%</span></div>`}).join('');
+      return;
+    }
+  }catch(e){}
+  // 回退东方财富
   const ids='1.000001,0.399001,0.399006,100.HSI,100.HSTECH';
   const url=`https://push2.eastmoney.com/api/qt/ulist.np/get?secids=${ids}&fields=f2,f3,f4,f12,f14&ut=fa5fd1943c7b386f172d6893dbbd1d0c&fltt=2`;
   try{const d=await smartFetch(url);const bar=document.getElementById('indexBar');
