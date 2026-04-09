@@ -41,23 +41,28 @@ function jsonp(url){
     document.head.appendChild(s);
   });
 }
-async function smartFetch(url){try{return await jsonp(url)}catch{try{const r=await fetch(url);return await r.json()}catch{return null}}}
+async function smartFetch(url){
+  for(let retry=0;retry<3;retry++){
+    try{return await jsonp(url)}catch(e1){
+      try{const r=await fetch(url);return await r.json()}catch(e2){}
+    }
+    if(retry<2) await new Promise(r=>setTimeout(r,500*(retry+1)));
+  }
+  return null;
+}
 function getSecid(code,market){
   if(market==='HK')return '116.'+code;
   if(code.startsWith('6')||code.startsWith('9')||code.startsWith('11')||code.startsWith('5'))return '1.'+code;
   return '0.'+code;
 }
+
+// ========== 东方财富API（单股详情、指数、搜索仍可用） ==========
 async function fetchQuote(secid){
   const url=`https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f168,f169,f170,f171,f292,f13&ut=fa5fd1943c7b386f172d6893dbbd1d0c&fltt=2`;
   const d=await smartFetch(url);return d?.data||null;
 }
 async function fetchMinute(secid){
   const url=`https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ut=fa5fd1943c7b386f172d6893dbbd1d0c&iscr=0&ndays=1`;
-  const d=await smartFetch(url);return d?.data||null;
-}
-async function fetchKline(secid,period,count){
-  count=count||120;
-  const url=`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=${period}&fqt=1&end=20500101&lmt=${count}&ut=fa5fd1943c7b386f172d6893dbbd1d0c`;
   const d=await smartFetch(url);return d?.data||null;
 }
 async function fetchIndexData(){
@@ -73,6 +78,108 @@ async function searchStock(kw){
   try{const d=await smartFetch(url);if(d?.QuotationCodeTable?.Data)return d.QuotationCodeTable.Data.filter(x=>['0','1','116','128','100'].includes(x.MktNum)).map(x=>({code:x.Code,name:x.Name,market:['116','128','100'].includes(x.MktNum)?'HK':'A',secid:x.MktNum+'.'+x.Code}))}catch{}
   return[];
 }
+
+// ========== 腾讯行情API（支持CORS，全市场数据） ==========
+// 生成A股全部可能的代码列表
+function generateAllAStockCodes(){
+  const codes=[];
+  // 上海主板 600000-601999
+  for(let i=600000;i<=601999;i++) codes.push('sh'+i);
+  // 上海主板 603000-603999
+  for(let i=603000;i<=603999;i++) codes.push('sh'+i);
+  // 上海主板 605000-605499
+  for(let i=605000;i<=605499;i++) codes.push('sh'+i);
+  // 上海科创板 688000-688999
+  for(let i=688000;i<=688999;i++) codes.push('sh'+i);
+  // 深圳主板 000001-002999
+  for(let i=1;i<=2999;i++) codes.push('sz'+String(i).padStart(6,'0'));
+  // 深圳创业板 300000-301999
+  for(let i=300000;i<=301999;i++) codes.push('sz'+i);
+  return codes;
+}
+
+// 批量获取腾讯行情数据（支持CORS）
+async function fetchBatchQQ(codeList){
+  const query=codeList.join(',');
+  try{
+    const r=await fetch('https://web.sqt.gtimg.cn/q='+query);
+    // 腾讯API返回GBK编码，需要用TextDecoder解码
+    const buf=await r.arrayBuffer();
+    const text=new TextDecoder('gbk').decode(buf);
+    const results=[];
+    const lines=text.split('\n');
+    for(const line of lines){
+      const m=line.match(/v_([^=]+)="([^"]*)"/);
+      if(!m)continue;
+      const sym=m[1]; // sh600519
+      const fields=m[2].split('~');
+      if(fields.length<50||!fields[1]||fields[3]==='0.000'||fields[3]==='0.00'||fields[3]==='')continue;
+      results.push({
+        symbol:sym,
+        code:fields[2],
+        name:fields[1],
+        close:parseFloat(fields[3])||0,
+        preClose:parseFloat(fields[4])||0,
+        open:parseFloat(fields[5])||0,
+        vol:parseInt(fields[6])||0,        // 成交量(手)
+        chg:parseFloat(fields[31])||0,      // 涨跌额
+        pctChg:parseFloat(fields[32])||0,   // 涨跌幅%
+        high:parseFloat(fields[33])||0,
+        low:parseFloat(fields[34])||0,
+        amount:parseFloat(fields[37])*10000||0, // 成交额(万转元)
+        turnover:parseFloat(fields[38])||0, // 换手率%
+        pe:parseFloat(fields[39])||0,       // PE
+        amp:parseFloat(fields[43])||0,      // 振幅%
+        totalMv:parseFloat(fields[44])*1e8||0, // 总市值(亿转元)
+        circMv:parseFloat(fields[45])*1e8||0,  // 流通市值(亿转元)
+        pb:parseFloat(fields[46])||0,       // PB
+        volRatio:parseFloat(fields[49])||0  // 量比
+      });
+    }
+    return results;
+  }catch(e){
+    console.error('腾讯行情API失败:',e);
+    return [];
+  }
+}
+
+// ========== 腾讯K线API（支持CORS） ==========
+async function fetchKlineQQ(symbol,count){
+  count=count||65;
+  const url=`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${symbol},day,,,${count},qfq`;
+  try{
+    const r=await fetch(url);
+    const d=await r.json();
+    const key=Object.keys(d.data||{})[0];
+    if(!key)return null;
+    const dayData=d.data[key].qfqday||d.data[key].day;
+    if(!dayData)return null;
+    return dayData.map(bar=>({
+      date:bar[0],open:parseFloat(bar[1]),close:parseFloat(bar[2]),
+      high:parseFloat(bar[3]),low:parseFloat(bar[4]),vol:parseFloat(bar[5])*100
+    }));
+  }catch(e){return null}
+}
+
+// 兼容旧代码 - fetchKline使用腾讯API优先
+async function fetchKline(secid,period,count){
+  count=count||120;
+  const parts=secid.split('.');
+  let symbol='';
+  if(parts[0]==='1') symbol='sh'+parts[1];
+  else if(parts[0]==='0') symbol='sz'+parts[1];
+  else if(parts[0]==='116') symbol='hk'+parts[1];
+  else symbol='sh'+parts[1];
+  const qqData=await fetchKlineQQ(symbol,count);
+  if(qqData&&qqData.length>0){
+    return {code:parts[1],klines:qqData.map(b=>`${b.date},${b.open},${b.close},${b.high},${b.low},${b.vol},0,0,0,0,0`)};
+  }
+  // 回退东方财富
+  const url=`https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=${period}&fqt=1&end=20500101&lmt=${count}&ut=fa5fd1943c7b386f172d6893dbbd1d0c`;
+  const d=await smartFetch(url);return d?.data||null;
+}
+
+// 保留旧接口兼容
 async function fetchMarketStocks(market,page,size){
   let fs;
   if(market==='A') fs='m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23';
