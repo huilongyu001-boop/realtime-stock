@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能选股 & 实时行情系统 - A股 & 港股</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg-primary:#0a0e17;--bg-secondary:#111827;--bg-card:#1a2235;--bg-card-hover:#1f2a40;
+  --border:#2a3a52;--text-primary:#e8edf5;--text-secondary:#8899b4;--text-muted:#5a6a82;
+  --accent:#3b82f6;--accent-glow:rgba(59,130,246,.3);
+  --green:#22c55e;--green-bg:rgba(34,197,94,.12);--red:#ef4444;--red-bg:rgba(239,68,68,.12);
+  --yellow:#f59e0b;--yellow-bg:rgba(245,158,11,.12);--purple:#a855f7;--purple-bg:rgba(168,85,247,.12);
+  --cyan:#06b6d4;--cyan-bg:rgba(6,182,212,.12);--orange:#f97316;
+}
+body{background:var(--bg-primary);color:var(--text-primary);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.5}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:var(--bg-secondary)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+.header{background:linear-gradient(135deg,var(--bg-secondary),var(--bg-card));border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-icon{width:34px;height:34px;background:linear-gradient(135deg,var(--accent),#8b5cf6);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff}
+.logo-text{font-size:16px;font-weight:700}.logo-sub{font-size:10px;color:var(--text-muted)}
+.header-right{display:flex;align-items:center;gap:14px}
+.search-box{display:flex;align-items:center;gap:6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:5px 10px;width:280px;position:relative}
+.search-box input{background:none;border:none;color:var(--text-primary);font-size:13px;outline:none;width:100%}
+.search-box input::placeholder{color:var(--text-muted)}
+.market-status{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-secondary)}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--red)}
+.status-dot.open{background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.index-bar{display:flex;gap:14px;padding:6px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border);overflow-x:auto}
+.index-item{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.index-name{font-size:11px;color:var(--text-muted)}.index-val{font-size:12px;font-weight:600;font-family:monospace}
+
+/* Tabs */
+.tab-bar{display:flex;gap:2px;padding:6px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border)}
+.tab-btn{padding:7px 18px;border:none;border-radius:8px 8px 0 0;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:500;transition:all .2s}
+.tab-btn:hover{background:var(--bg-card);color:var(--text-primary)}
+.tab-btn.active{background:var(--bg-card);color:var(--accent);border-bottom:2px solid var(--accent)}
+
+.main{display:flex;height:calc(100vh - 140px)}
+.sidebar{width:260px;min-width:260px;background:var(--bg-secondary);border-right:1px solid var(--border);overflow-y:auto;padding:6px;display:flex;flex-direction:column}
+.content{flex:1;overflow-y:auto;padding:14px}
+
+/* Strategy cards in sidebar */
+.section-title{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--text-muted);padding:8px 10px 4px;font-weight:600}
+.strat-card{padding:8px 10px;margin:2px 4px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid transparent;transition:all .15s}
+.strat-card:hover{background:var(--bg-card);border-color:var(--border)}
+.strat-card.active{background:rgba(59,130,246,.1);border-color:var(--accent)}
+.strat-icon{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.strat-info{flex:1;min-width:0}
+.strat-name{font-size:12px;font-weight:600}
+.strat-desc{font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strat-badge{font-size:10px;padding:2px 6px;border-radius:8px;font-weight:700;min-width:24px;text-align:center}
+
+/* Watchlist items */
+.wl-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;transition:background .15s}
+.wl-item:hover{background:var(--bg-card-hover)}.wl-item.active{background:var(--bg-card);border-color:var(--accent)}
+.wl-name{font-size:13px;font-weight:600}.wl-code{font-size:10px;color:var(--text-muted)}
+.wl-price{text-align:right}.wl-price .pr{font-size:14px;font-weight:700;font-family:monospace}.wl-price .ch{font-size:11px}
+.up{color:var(--red)}.down{color:var(--green)}.flat{color:var(--text-muted)}
+
+/* Cards */
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+.card-title{font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+
+/* Detail */
+.detail-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+.detail-name{font-size:22px;font-weight:700}.detail-code{font-size:12px;color:var(--text-muted);margin-top:3px}
+.detail-price{font-size:30px;font-weight:800;font-family:monospace}.detail-change{font-size:14px;margin-top:3px}
+.info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px}
+.info-item{background:var(--bg-secondary);border-radius:7px;padding:8px 10px;text-align:center}
+.info-label{font-size:10px;color:var(--text-muted);margin-bottom:3px}.info-value{font-size:13px;font-weight:600;font-family:monospace}
+
+.chart-container{position:relative;width:100%;background:var(--bg-secondary);border-radius:8px;overflow:hidden}
+.chart-container canvas{width:100%!important}
+.chart-toolbar{display:flex;gap:3px;margin-bottom:6px;flex-wrap:wrap}
+.chart-btn{padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:11px;transition:all .15s}
+.chart-btn:hover{border-color:var(--accent);color:var(--accent)}
+.chart-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+.indicator-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.ind-card{background:var(--bg-secondary);border-radius:7px;padding:10px}
+.ind-name{font-size:11px;color:var(--text-muted);margin-bottom:4px}
+.ind-val{font-size:15px;font-weight:700;font-family:monospace}
+.ind-sig{font-size:10px;margin-top:3px;padding:2px 6px;border-radius:4px;display:inline-block}
+.sig-buy{background:var(--red-bg);color:var(--red)}.sig-sell{background:var(--green-bg);color:var(--green)}.sig-neutral{background:var(--yellow-bg);color:var(--yellow)}
+
+/* Screening results table */
+.screen-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;height:100%}
+.screen-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.screen-header h2{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.screen-header .desc{font-size:11px;color:var(--text-secondary)}
+.condition-tags{display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.15);flex-shrink:0}
+.cond-tag{padding:3px 8px;border-radius:5px;font-size:10px;display:flex;align-items:center;gap:3px}
+.cond-tag.met{background:var(--green-bg);color:var(--green)}.cond-tag.info{background:var(--cyan-bg);color:var(--cyan)}
+.screen-actions{display:flex;gap:6px;align-items:center}
+.scan-btn{padding:6px 14px;border:none;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;transition:all .2s;display:flex;align-items:center;gap:4px}
+.scan-btn.primary{background:linear-gradient(135deg,var(--accent),#6366f1);color:#fff}
+.scan-btn.primary:hover{transform:translateY(-1px);box-shadow:0 3px 12px var(--accent-glow)}
+.scan-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.scan-btn .spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+
+.table-wrap{overflow:auto;flex:1;min-height:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead{position:sticky;top:0;z-index:10}
+th{background:var(--bg-secondary);padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary);font-size:11px;white-space:nowrap;cursor:pointer;border-bottom:1px solid var(--border)}
+th:hover{color:var(--accent)}th.sorted{color:var(--accent)}
+td{padding:7px 10px;border-bottom:1px solid rgba(42,58,82,.4);white-space:nowrap}
+tr:hover td{background:var(--bg-card-hover)}
+.s-name{font-weight:600;cursor:pointer}.s-name:hover{color:var(--accent)}.s-code{color:var(--text-muted);font-size:10px}
+.pct{font-weight:600;padding:2px 6px;border-radius:4px;font-size:11px;display:inline-block;min-width:55px;text-align:center}
+.pct.up{background:var(--red-bg);color:var(--red)}.pct.down{background:var(--green-bg);color:var(--green)}.pct.flat{background:rgba(255,255,255,.05);color:var(--text-secondary)}
+.sig-tag{font-size:9px;padding:2px 5px;border-radius:3px;font-weight:600;display:inline-block;margin:1px}
+.sig-tag.buy{background:var(--red-bg);color:var(--red)}.sig-tag.sell{background:var(--green-bg);color:var(--green)}.sig-tag.watch{background:var(--yellow-bg);color:var(--yellow)}.sig-tag.info{background:var(--purple-bg);color:var(--purple)}
+
+.pagination{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-top:1px solid var(--border);flex-shrink:0;font-size:12px;color:var(--text-muted)}
+.page-btns{display:flex;gap:3px}
+.pg-btn{padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);cursor:pointer;font-size:11px;transition:all .15s}
+.pg-btn:hover{border-color:var(--accent);color:var(--accent)}.pg-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.pg-btn:disabled{opacity:.3;cursor:not-allowed}
+
+.progress-bar{height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin:6px 0}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),#8b5cf6);border-radius:2px;transition:width .3s;width:0}
+
+/* Loading overlay */
+.loading-cover{display:none;position:absolute;inset:0;background:rgba(10,14,23,.8);z-index:50;align-items:center;justify-content:center;flex-direction:column;gap:12px;border-radius:12px}
+.loading-cover.show{display:flex}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+
+/* Market filter pills */
+.mkt-pills{display:flex;gap:3px;padding:6px 10px}
+.mkt-pill{padding:3px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:11px;transition:all .15s}
+.mkt-pill:hover{border-color:var(--accent)}.mkt-pill.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* Detail modal */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;backdrop-filter:blur(4px)}
+.modal-bg.show{display:flex;align-items:center;justify-content:center}
+.modal{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;width:860px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:20px}
+.modal-close{float:right;background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;padding:2px 6px}
+.modal-close:hover{color:var(--text-primary)}
+
+.add-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;align-items:center;justify-content:center}
+.add-modal.show{display:flex}
+
+/* Responsive */
+@media(max-width:768px){.sidebar{display:none}.info-grid{grid-template-columns:repeat(2,1fr)}.indicator-grid{grid-template-columns:1fr}.search-box{width:180px}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">📊</div>
+    <div><div class="logo-text">智能选股 & 实时行情</div><div class="logo-sub">A股 · 港股 | 八大战法 · 量化策略 · 实时行情</div></div>
+  </div>
+  <div class="header-right">
+    <div class="search-box">
+      <span>🔍</span>
+      <input type="text" id="searchInput" placeholder="搜索股票代码或名称..." autocomplete="off">
+    </div>
+    <div class="market-status"><div class="status-dot" id="statusDot"></div><span id="statusText">休市</span></div>
+    <div style="font-size:11px;color:var(--text-muted)" id="clockTime"></div>
+  </div>
+</div>
+<div class="index-bar" id="indexBar"><span style="color:var(--text-muted);padding:4px">加载指数...</span></div>
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('screen',this)">🎯 智能选股</button>
+  <button class="tab-btn" onclick="switchTab('watch',this)">📋 自选行情</button>
+</div>
+<div class="main">
+  <div class="sidebar" id="sidebarContainer"></div>
+  <div class="content" id="mainContent"></div>
+</div>
+<!-- Detail Modal -->
+<div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modalContent"></div>
+</div>
+<!-- Add Stock Modal -->
+<div class="add-modal" id="addModal">
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;width:380px;max-width:90vw">
+    <h3 style="margin-bottom:12px">添加自选股</h3>
+    <input type="text" id="addInput" placeholder="输入代码，如 600519 / 00700" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:7px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;outline:none;margin-bottom:10px">
+    <div id="addResults" style="max-height:180px;overflow-y:auto;margin-bottom:10px"></div>
+    <div style="text-align:right"><button onclick="closeAddModal()" style="padding:6px 14px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px">取消</button></div>
+  </div>
+</div>
+<script src="app.js"></script>
+<script src="core.js"></script>
+<script src="scan.js"></script>
+<script src="ui.js"></script>
+<script src="detail.js"></script>
+</body>
+</html>
